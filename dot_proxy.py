@@ -5,13 +5,14 @@ import sys
 import ssl
 import socket
 import logging
-import multiprocessing
+import time
 from socketserver import BaseRequestHandler, ThreadingTCPServer, ThreadingUDPServer
+import threading
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 NAMESERVER = '1.1.1.1'
-PROXY_ADDR = ''
+PROXY_ADDR = '0.0.0.0'
 PROXY_PORT = 53
 BUFFER_SIZE = 1024
 
@@ -24,28 +25,6 @@ def tls_wrapper(packet, hostname, port=853) -> bytes:
             tlssock.send(packet)
             result = tlssock.recv(BUFFER_SIZE)
             return result
-
-
-class DNSoverTCP(BaseRequestHandler):
-    """DNS-over-TCP worker"""
-
-    def handle(self) -> None:
-        """Handler for TCP requests"""
-        try:
-            logging.info('TCP connection from %s', self.client_address)
-            while True:
-                msg = self.request.recv(BUFFER_SIZE)
-                if not msg:
-                    break
-                answer = tls_wrapper(msg, hostname=NAMESERVER)
-                self.request.send(answer)
-        except socket.timeout as err:
-            logging.error('TIMEOUT ERROR: %s', err)
-            sys.exit(1)
-        except socket.error as err:
-            logging.error('ERROR OCCURRED: %s', err)
-            self.request.close()
-            sys.exit(1)
 
 
 class DNSoverUDP(BaseRequestHandler):
@@ -77,16 +56,12 @@ class DNSoverUDP(BaseRequestHandler):
 
 def main() -> None:
     """Wrapper for TCP and UDP workers"""
-    ThreadingTCPServer.allow_reuse_address = True
     ThreadingUDPServer.allow_reuse_address = True
-    tcp_proxy = ThreadingTCPServer((PROXY_ADDR, PROXY_PORT), DNSoverTCP)
     udp_proxy = ThreadingUDPServer((PROXY_ADDR, PROXY_PORT), DNSoverUDP)
-    tcp_process = multiprocessing.Process(target=tcp_proxy.serve_forever)
-    udp_process = multiprocessing.Process(target=udp_proxy.serve_forever)
-    tcp_process.start()
-    logging.info('DNS Proxy over TCP started and listening on port %s', PROXY_PORT)
-    udp_process.start()
-    logging.info('DNS Proxy over UDP started and listening on port %s', PROXY_PORT)
+
+    threading.Thread(target=lambda: udp_proxy.serve_forever(), daemon=True).start()
+    logging.info(f'DNS Proxy over UDP starting and listening on {PROXY_ADDR}:{PROXY_PORT}')
+    time.sleep(3600 * 24 * 30)
 
 
 if __name__ == '__main__':
