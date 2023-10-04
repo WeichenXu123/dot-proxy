@@ -11,7 +11,7 @@ import threading
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 
-NAMESERVER = '1.1.1.1'  # '208.67.222.222' # '1.1.1.1'
+NAMESERVER = '1.1.1.1'  # '208.67.222.222' # '1.1.1.1'  # '208.67.222.222' # '1.1.1.1'
 PROXY_ADDR = '0.0.0.0'
 PROXY_PORT = 53
 BUFFER_SIZE = 1024
@@ -23,7 +23,17 @@ def tls_wrapper(packet, hostname, port=853) -> bytes:
     with socket.create_connection((hostname, port), timeout=10) as sock:
         with context.wrap_socket(sock, server_hostname=hostname) as tlssock:
             tlssock.send(packet)
-            result = tlssock.recv(BUFFER_SIZE)
+            msglen_bytes = tlssock.recv(2)
+            msglen = msglen_bytes[0] * 256 + msglen_bytes[1]
+
+            result = msglen_bytes
+            remaining = msglen
+
+            while remaining > 0:
+                chunk = tlssock.recv(remaining)
+                remaining -= len(chunk)
+                result += chunk
+
             return result
 
 
@@ -31,27 +41,40 @@ class DNSoverUDP(BaseRequestHandler):
     """DNS-over-UDP worker"""
 
     def handle(self) -> None:
+        try:
+            self._handle()
+        except Exception:
+            pass
+
+    def _handle(self) -> None:
         """Handler for UDP requests"""
         logging.info('UDP connection from %s', self.client_address)
         msg, sock = self.request
-        tcp_packet = self.udp_to_tcp(msg)
+        try:
+            tcp_packet = self.udp_to_tcp(msg)
+        except Exception as err:
+            logging.error("udp_to_tcp failed: %s", err)
+            raise
+
         try:
             tls_answer = tls_wrapper(tcp_packet, hostname=NAMESERVER)
         except socket.timeout as err:
             logging.error('TLS TIMEOUT ERROR: %s', err)
-            # sys.exit(1)
+            raise
         except socket.error as err:
-            logging.error('TLS ERROR OCCURRED: %s', err)
-            # sys.exit(1)
+            logging.error('TLS socket ERROR OCCURRED: %s', err)
+            raise
+        except Exception as err:
+            logging.error('TLS general ERROR OCCURRED: %s', err)
         try:
             udp_answer = tls_answer[2:]
             sock.sendto(udp_answer, self.client_address)
         except socket.timeout as err:
             logging.error('UDP TIMEOUT ERROR: %s', err)
-            # sys.exit(1)
+            raise
         except socket.error as err:
             logging.error('UDP ERROR OCCURRED: %s', err)
-            # sys.exit(1)
+            raise
 
     @staticmethod
     def udp_to_tcp(packet) -> bytes:
