@@ -11,7 +11,7 @@ import threading
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 
-NAMESERVER = '1.1.1.1'  # '208.67.222.222' # '1.1.1.1'
+NAMESERVER = '208.67.222.222' # '1.1.1.1'  # '208.67.222.222' # '1.1.1.1'
 PROXY_ADDR = '0.0.0.0'
 PROXY_PORT = 53
 BUFFER_SIZE = 1024
@@ -19,11 +19,7 @@ BUFFER_SIZE = 1024
 
 def tls_wrapper(packet, hostname, port=853) -> bytes:
     """SSL wrapper for socket"""
-    context = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH)
-    # NOTE: skip cert verification.
-    context.verify_mode = ssl.CERT_NONE
-    context.check_hostname = False
-
+    context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
     with socket.create_connection((hostname, port), timeout=10) as sock:
         with context.wrap_socket(sock, server_hostname=hostname) as tlssock:
             tlssock.send(packet)
